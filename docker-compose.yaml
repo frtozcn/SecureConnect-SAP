@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: secureconnect-db
+    environment:
+      POSTGRES_USER: secureconnect_user
+      POSTGRES_PASSWORD: supersecretpassword
+      POSTGRES_DB: secureconnect_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - secureconnect-network
+
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: secureconnect-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root_token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - secureconnect-network
+
+  app:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: secureconnect-app
+    depends_on:
+      - db
+      - vault
+    environment:
+      - DATABASE_URL=postgresql://secureconnect_user:supersecretpassword@db:5432/secureconnect_db
+      - VAULT_URL=http://vault:8200
+      - VAULT_TOKEN=root_token
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - secureconnect-network
+
+volumes:
+  postgres_data:
+
+networks:
+  secureconnect-network:
+    driver: bridge
