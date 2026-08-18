@@ -12,6 +12,7 @@ class PlatformUser(Base):
     password_hash = Column(String(255))
     role = Column(String(50)) # Admin, Lead, Consultant
     created_at = Column(DateTime, default=datetime.utcnow)
+    assigned_customer_ids = Column(Text, default="")
 
 class Customer(Base):
     __tablename__ = "customers"

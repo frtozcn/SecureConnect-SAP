@@ -1,0 +1,6 @@
+email,role,assigned_customers
+admin@ndbs.example,Admin,Tümü
+ali.demir@ndbs.example,Danışman,"Anadolu Kimya A.Ş.,Mavi Enerji"
+ayse.kaya@ndbs.example,Danışman,"Doruk Otomotiv,Kardelen Tekstil"
+mehmet.can@ndbs.example,Danışman,"Boğaz Lojistik,Anadolu Kimya A.Ş."
+lead@ndbs.example,Takım Lideri,Tümü

@@ -1,0 +1,12 @@
+customer_name,sid,environment,system_type,app_server,instance_number,clients
+Anadolu Kimya A.Ş.,AKD,DEV,S/4HANA,sapdev.anadolukimya.example,00,"100,200"
+Anadolu Kimya A.Ş.,AKQ,QAS,S/4HANA,sapqas.anadolukimya.example,00,300
+Anadolu Kimya A.Ş.,AKP,PRD,S/4HANA,sapprd.anadolukimya.example,00,300
+Doruk Otomotiv,DOD,DEV,ECC,10.20.1.11,01,100
+Doruk Otomotiv,DOP,PRD,ECC,10.20.1.21,01,500
+Mavi Enerji,MED,DEV,S/4HANA,s4dev.mavienerji.example,02,110
+Mavi Enerji,MEQ,QAS,S/4HANA,s4qas.mavienerji.example,02,110
+Mavi Enerji,MEP,PRD,S/4HANA,s4prd.mavienerji.example,02,110
+Kardelen Tekstil,KTP,PRD,ECC,sap.kardelen.example (SAProuter: /H/198.51.100.7/S/3299/H/),00,800
+Boğaz Lojistik,BLD,DEV,S/4HANA,sapd.bogazlojistik.example,10,100
+Boğaz Lojistik,BLP,PRD,S/4HANA,sapp.bogazlojistik.example,10,100

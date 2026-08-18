@@ -1,0 +1,9 @@
+system_sid,client,username,user_type,note
+AKD,100,CONSULT01,Dialog,90 günde bir değişir
+AKD,200,CONSULT01,Dialog,
+AKP,300,NTTSUPPORT,Ortak,Sadece kıdemliler
+AKP,300,RFC_INT01,RFC,Entegrasyon hesabı
+DOP,500,ADANISMAN,Dialog,
+MEP,110,SUPPORT_TR,Ortak,Şifre politikası: min 10 karakter
+KTP,800,CONSULT02,Dialog,SAProuter üzerinden bağlanılır
+BLP,100,NTTSUPPORT,Ortak,

@@ -6,5 +6,7 @@ psycopg2-binary==2.9.9
 hvac==2.4.0
 pydantic==2.7.2
 pydantic-settings==2.2.1
-passlib[bcrypt]==1.7.4
+passlib==1.7.4
+bcrypt==3.2.2
 python-jose[cryptography]==3.3.0
+PyJWT==2.8.0

@@ -1,0 +1,6 @@
+name,sector,vpn_type,vpn_gateway
+Anadolu Kimya A.Ş.,Kimya,FortiClient,vpn.anadolukimya.example (port 10443)
+Doruk Otomotiv,Otomotiv,Cisco Secure Client,remote.dorukoto.example
+Mavi Enerji,Enerji,GlobalProtect,gp.mavienerji.example
+Kardelen Tekstil,Tekstil,OpenVPN (.ovpn dosyası),ovpn.kardelen.example (UDP 1194)
+Boğaz Lojistik,Lojistik,WireGuard,wg.bogazlojistik.example
