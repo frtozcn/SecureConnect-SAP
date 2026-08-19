@@ -21,6 +21,7 @@ class Customer(Base):
     sector = Column(String(100))
     password_policy_note = Column(Text)
     description = Column(Text)
+    comment = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     vpn_profile = relationship("VpnProfile", back_populates="customer", uselist=False)
@@ -36,6 +37,7 @@ class VpnProfile(Base):
     config_file_url = Column(String(255))
     instructions = Column(Text)
     description = Column(Text)
+    comment = Column(Text)
     
     customer = relationship("Customer", back_populates="vpn_profile")
 
@@ -50,6 +52,7 @@ class SapSystem(Base):
     instance_number = Column(String(2))
     sap_router = Column(String(255), nullable=True)
     description = Column(Text)
+    comment = Column(Text)
     
     customer = relationship("Customer", back_populates="sap_systems")
     clients = relationship("SapClient", back_populates="system")
@@ -60,6 +63,7 @@ class SapClient(Base):
     system_id = Column(UUID(as_uuid=True), ForeignKey("sap_systems.id"))
     client_number = Column(String(3))
     description = Column(Text)
+    comment = Column(Text)
     
     system = relationship("SapSystem", back_populates="clients")
     users = relationship("SapUser", back_populates="client")
@@ -74,6 +78,7 @@ class SapUser(Base):
     notes = Column(Text)
     last_modified_date = Column(DateTime, default=datetime.utcnow)
     description = Column(Text)
+    comment = Column(Text)
     
     client = relationship("SapClient", back_populates="users")
 
