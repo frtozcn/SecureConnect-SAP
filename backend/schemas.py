@@ -135,3 +135,46 @@ class SapUserResponse(SapUserBase):
 
     class Config:
         from_attributes = True
+
+class SapUserPasswordResponse(BaseModel):
+    password: str
+    last_modified_date: datetime
+
+    class Config:
+        from_attributes = True
+
+# ==========================================
+# AUDIT LOG
+# ==========================================
+class AuditLogResponse(BaseModel):
+    id: UUID
+    user_email: Optional[str] = None
+    action: str
+    resource_type: str
+    resource_id: Optional[UUID] = None
+    ip_address: Optional[str] = None
+    detail: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# ==========================================
+# COMMENT
+# ==========================================
+
+class CommentCreate(BaseModel):
+    resource_type: str
+    resource_id: UUID
+    text: str
+
+class CommentResponse(BaseModel):
+    id: UUID
+    resource_type: str
+    resource_id: UUID
+    author_email: str
+    text: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

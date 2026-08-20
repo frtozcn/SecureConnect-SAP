@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 import hvac
 import os
 import models
@@ -271,7 +271,7 @@ def get_sap_clients(
         return []
     
     allowed_ids = [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
-    return db.query(models.SapClient).join(models.SapSystem).filter(models.SapClient.customer_id.in_(allowed_ids)).offset(skip).limit(limit).all()
+    return db.query(models.SapClient).join(models.SapSystem).filter(models.SapSystem.customer_id.in_(allowed_ids)).offset(skip).limit(limit).all()
 
 @app.put("/sap-clients/{client_id}", response_model=schemas.SapClientResponse)
 def update_sap_client(
@@ -402,6 +402,28 @@ def delete_vpn_profile(
 # SAP USER (VAULT ENTEGRASYONLU) UÇ NOKTALARI
 # ==========================================
 
+@app.get("/sap-users/", response_model=list[schemas.SapUserResponse])
+def get_sap_users(
+    client_id: UUID | None = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    query = db.query(models.SapUser).join(models.SapClient).join(models.SapSystem)
+
+    user_role = current_user.role.lower()
+    if user_role not in ["admin", "lead", "uzman"]:
+        allowed_ids = _get_allowed_customer_ids(current_user)
+        if not allowed_ids:
+            return []
+        query = query.filter(models.SapSystem.customer_id.in_(allowed_ids))
+
+    if client_id is not None:
+        query = query.filter(models.SapUser.client_id == client_id)
+
+    return query.offset(skip).limit(limit).all()
+
 @app.post("/sap-users/", response_model=schemas.SapUserResponse)
 def create_sap_user(
     user_data: schemas.SapUserCreate, 
@@ -433,21 +455,197 @@ def create_sap_user(
 
     return db_user
 
-@app.get("/sap-users/{user_id}/password")
-def get_sap_user_password(
+# ==========================================
+# SAP USER — ŞİFRE OKUMA AKIŞI (GÖSTER / KOPYALA)
+# ==========================================
+
+def _get_allowed_customer_ids(current_user: models.PlatformUser) -> list[str]:
+    if not current_user.assigned_customer_ids:
+        return []
+    return [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
+
+
+def _get_sap_user_or_404(db: Session, user_id: str) -> models.SapUser:
+    db_user = db.query(models.SapUser).filter(models.SapUser.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="SAP kullanıcısı bulunamadı.")
+    return db_user
+
+
+def _check_customer_access(db_user: models.SapUser, current_user: models.PlatformUser):
+    """Danışman, sadece atandığı müşterinin SAP kullanıcısına erişebilir."""
+    role = current_user.role.lower()
+    if role in ["admin", "lead", "uzman"]:
+        return
+    customer_id = str(db_user.client.system.customer_id)
+    if customer_id not in _get_allowed_customer_ids(current_user):
+        raise HTTPException(status_code=403, detail="Bu kaydın müşterisine erişim yetkiniz yok.")
+
+
+def _log_audit(db: Session, current_user: models.PlatformUser, action: str,
+                resource_type: str, resource_id, request: Request, detail: str = None):
+    log = models.AuditLog(
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        ip_address=request.client.host if request.client else None,
+        detail=detail,
+    )
+    db.add(log)
+    db.commit()
+
+
+@app.post("/sap-users/{user_id}/reveal-password", response_model=schemas.SapUserPasswordResponse)
+def reveal_sap_user_password(
     user_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    # Bu uç nokta sadece şifreyi çözmek içindir. (Yönergedeki maskeli gösterim akışı)
-    
-    # 1. Kullanıcıyı DB'den bul
-    db_user = db.query(models.SapUser).filter(models.SapUser.id == user_id).first()
-    if not db_user or not db_user.vault_secret_path:
-        raise HTTPException(status_code=404, detail="Kullanıcı veya şifre yolu bulunamadı.")
+    """'Göster' butonu. Frontend 15 saniye açık tutup sonra maskeleyecek — süre UI tarafında."""
+    db_user = _get_sap_user_or_404(db, user_id)
+    _check_customer_access(db_user, current_user)
 
-    # (Buraya ileride "Danışman sadece kendi müşterisinin kullanıcısının şifresini görebilir" mantığı eklenebilir)
+    # RFC/technical kullanıcı şifresi danışmana GÖSTERİLMEZ, sadece admin görebilir (F3)
+    if db_user.user_type and db_user.user_type.lower() == "rfc" and current_user.role.lower() != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="RFC/technical kullanıcı şifresi sadece kopyalanabilir, görüntülenemez."
+        )
 
-    # 2. Vault'tan şifreyi oku ve döndür
+    if not db_user.vault_secret_path:
+        raise HTTPException(status_code=404, detail="Bu kullanıcı için Vault'ta kayıtlı şifre yok.")
+
     secret_data = read_secret_from_vault(path=db_user.vault_secret_path)
-    return {"password": secret_data.get("password")}
+    password = secret_data.get("password")
+
+    _log_audit(db, current_user, "PASSWORD_VIEWED", "sap_user", db_user.id, request)
+
+    return {"password": password, "last_modified_date": db_user.last_modified_date}
+
+
+@app.post("/sap-users/{user_id}/copy-password", response_model=schemas.SapUserPasswordResponse)
+def copy_sap_user_password(
+    user_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    """'Kopyala' butonu. RFC kullanıcı dahil herkes kopyalayabilir (F3) — frontend değeri ekranda göstermeden panoya yazacak."""
+    db_user = _get_sap_user_or_404(db, user_id)
+    _check_customer_access(db_user, current_user)
+
+    if not db_user.vault_secret_path:
+        raise HTTPException(status_code=404, detail="Bu kullanıcı için Vault'ta kayıtlı şifre yok.")
+
+    secret_data = read_secret_from_vault(path=db_user.vault_secret_path)
+    password = secret_data.get("password")
+
+    _log_audit(db, current_user, "PASSWORD_COPIED", "sap_user", db_user.id, request)
+
+    return {"password": password, "last_modified_date": db_user.last_modified_date}
+
+# ==========================================
+# YORUMLAR (Comment) — polimorfik, tarihçeli
+# ==========================================
+
+ALLOWED_RESOURCE_TYPES = {"customer", "vpn_profile", "sap_system", "sap_client", "sap_user"}
+
+def _resolve_resource_customer_id(db: Session, resource_type: str, resource_id) -> str:
+    """Yorumun hangi müşteriye ait olduğunu bulur — danışman yetki kontrolü için."""
+    if resource_type == "customer":
+        return str(resource_id)
+    if resource_type == "vpn_profile":
+        obj = db.query(models.VpnProfile).filter(models.VpnProfile.id == resource_id).first()
+    elif resource_type == "sap_system":
+        obj = db.query(models.SapSystem).filter(models.SapSystem.id == resource_id).first()
+    elif resource_type == "sap_client":
+        obj = db.query(models.SapClient).filter(models.SapClient.id == resource_id).first()
+        return str(obj.system.customer_id) if obj else None
+    elif resource_type == "sap_user":
+        obj = db.query(models.SapUser).filter(models.SapUser.id == resource_id).first()
+        return str(obj.client.system.customer_id) if obj else None
+    else:
+        return None
+    return str(obj.customer_id) if obj else None
+
+
+@app.post("/comments/", response_model=schemas.CommentResponse)
+def create_comment(
+    comment: schemas.CommentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    # Sadece Admin ve Lead yorum ekleyebilir (F2)
+    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
+        raise HTTPException(status_code=403, detail="Yorum ekleme yetkiniz yok.")
+
+    if comment.resource_type not in ALLOWED_RESOURCE_TYPES:
+        raise HTTPException(status_code=400, detail="Geçersiz kayıt türü.")
+
+    customer_id = _resolve_resource_customer_id(db, comment.resource_type, comment.resource_id)
+    if customer_id is None:
+        raise HTTPException(status_code=404, detail="İlgili kayıt bulunamadı.")
+
+    db_comment = models.Comment(
+        resource_type=comment.resource_type,
+        resource_id=comment.resource_id,
+        author_id=current_user.id,
+        author_email=current_user.email,
+        text=comment.text,
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+
+    _log_audit(db, current_user, "COMMENT_ADDED", comment.resource_type, comment.resource_id, request, detail=comment.text[:200])
+
+    return db_comment
+
+
+@app.get("/comments/", response_model=list[schemas.CommentResponse])
+def get_comments(
+    resource_type: str,
+    resource_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    if resource_type not in ALLOWED_RESOURCE_TYPES:
+        raise HTTPException(status_code=400, detail="Geçersiz kayıt türü.")
+
+    role = current_user.role.lower()
+    if role not in ["admin", "lead", "uzman"]:
+        customer_id = _resolve_resource_customer_id(db, resource_type, resource_id)
+        if customer_id not in _get_allowed_customer_ids(current_user):
+            raise HTTPException(status_code=403, detail="Bu kaydın yorumlarına erişim yetkiniz yok.")
+
+    return (
+        db.query(models.Comment)
+        .filter(models.Comment.resource_type == resource_type, models.Comment.resource_id == resource_id)
+        .order_by(models.Comment.created_at.desc())
+        .all()
+    )
+
+
+@app.delete("/comments/{comment_id}")
+def delete_comment(
+    comment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
+        raise HTTPException(status_code=403, detail="Yorum silme yetkiniz yok.")
+
+    db_comment = db.query(models.Comment).filter(models.Comment.id == comment_id).first()
+    if not db_comment:
+        raise HTTPException(status_code=404, detail="Yorum bulunamadı.")
+
+    _log_audit(db, current_user, "COMMENT_DELETED", db_comment.resource_type, db_comment.resource_id, request, detail=db_comment.text[:200])
+
+    db.delete(db_comment)
+    db.commit()
+    return {"message": "Yorum silindi."}

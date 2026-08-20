@@ -88,3 +88,25 @@ class Assignment(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("platform_users.id"))
     customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"))
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("platform_users.id"), nullable=True)
+    user_email = Column(String(255))  # kullanıcı silinse bile iz kalsın diye ayrıca tutuyoruz
+    action = Column(String(100))      # PASSWORD_VIEWED, PASSWORD_COPIED, LOGIN, ...
+    resource_type = Column(String(50))   # "sap_user", "vpn_profile" vb.
+    resource_id = Column(UUID(as_uuid=True), nullable=True)
+    ip_address = Column(String(45))      # IPv6 için 45 karakter yeter
+    detail = Column(Text, nullable=True) # ŞİFRE ASLA BURAYA YAZILMAYACAK
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class Comment(Base):
+    __tablename__ = "comments"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_type = Column(String(50))   # "customer", "vpn_profile", "sap_system", "sap_client", "sap_user"
+    resource_id = Column(UUID(as_uuid=True))  # gerçek FK değil — polimorfik olduğu için tek tabloya bağlanamaz
+    author_id = Column(UUID(as_uuid=True), ForeignKey("platform_users.id"))
+    author_email = Column(String(255))   # yazan kullanıcı silinse bile isim kalsın
+    text = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)

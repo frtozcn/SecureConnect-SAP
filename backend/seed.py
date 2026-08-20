@@ -54,26 +54,9 @@ def seed_data():
         clients_map = {}   # (sid, client_number) -> SapClient nesnesi
         users_map = {}     # email -> PlatformUser nesnesi
 
-        # ---------------------------------------------------------
-        # AŞAMA 1: PLATFORM KULLANICILARI
-        # ---------------------------------------------------------
-        print("Platform kullanicilari yukleniyor...")
-        with open("seed_data/platform_users.csv", mode="r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Kullanıcı için dummy şifre oluştur ve hash'le
-                hashed_pw = pwd_context.hash("Ndbs_Test_123!")
-                new_user = PlatformUser(
-                    email=row["email"],
-                    password_hash=hashed_pw,
-                    role=row["role"]
-                )
-                db.add(new_user)
-                users_map[row["email"]] = {"user": new_user, "assigned": row["assigned_customers"]}
-        db.commit()
 
         # ---------------------------------------------------------
-        # AŞAMA 2: MÜŞTERİLER VE VPN PROFİLLERİ
+        # AŞAMA 3: MÜŞTERİLER VE VPN PROFİLLERİ
         # ---------------------------------------------------------
         print("Musteriler ve VPN profilleri yukleniyor...")
         with open("seed_data/customers_vpn.csv", mode="r", encoding="utf-8") as f:
@@ -105,6 +88,50 @@ def seed_data():
                     vault_secret_path=vault_path
                 )
                 db.add(vpn_profile)
+        db.commit()
+
+        # ---------------------------------------------------------
+        # AŞAMA 2: PLATFORM KULLANICILARI
+        # ---------------------------------------------------------
+        print("Platform kullanicilari yukleniyor...")
+
+        # 1. Adım: Önce sistemdeki tüm müşterileri çekip İsim -> ID eşleştirmesi (sözlük) yaratalım
+        all_customers = db.query(Customer).all() # Customer modelinin import edildiğini varsayıyorum
+        customer_map = {c.name.strip().lower(): str(c.id) for c in all_customers}
+
+        with open("seed_data/platform_users.csv", mode="r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Kullanıcı için dummy şifre oluştur ve hash'le
+                hashed_pw = pwd_context.hash("Ndbs_Test_123!")
+                
+                # 2. Adım: CSV'deki müşteri isimlerini ayır ve UUID'lere dönüştür
+                assigned_names = [name.strip().lower() for name in row["assigned_customers"].split(",") if name.strip()]
+                
+                assigned_ids = []
+                for name in assigned_names:
+                    if name == "tümü":
+                        continue # Adminler için "tümü" yazısını atla, ID aramaya çalışma
+                    elif name in customer_map:
+                        assigned_ids.append(customer_map[name])
+                    else:
+                        print(f"Uyarı: '{name}' isimli müşteri veritabanında bulunamadı!")
+                
+                # ID listesini "uuid1,uuid2" formatında string'e çevir
+                assigned_ids_str = ",".join(assigned_ids) if assigned_ids else None
+
+                # 3. Adım: Kullanıcıyı oluştur ve atamaları ekle
+                new_user = PlatformUser(
+                    email=row["email"],
+                    password_hash=hashed_pw,
+                    role=row["role"],
+                    assigned_customer_ids=assigned_ids_str  # Atamaları doğrudan modele ekliyoruz
+                )
+                db.add(new_user)
+                
+                # (Opsiyonel) Eğer users_map'i başka bir fonksiyonda kullanmıyorsan silebilirsin
+                users_map[row["email"]] = {"user": new_user, "assigned": row["assigned_customers"]}
+                
         db.commit()
 
         # ---------------------------------------------------------
