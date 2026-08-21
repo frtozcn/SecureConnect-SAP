@@ -143,6 +143,10 @@ class SapUserPasswordResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class PasswordUpdateCreate(BaseModel):
+    new_password: str
+    reason: str
+
 # ==========================================
 # AUDIT LOG
 # ==========================================
@@ -150,7 +154,7 @@ class AuditLogResponse(BaseModel):
     id: UUID
     user_email: Optional[str] = None
     action: str
-    resource_type: str
+    resource_type: Optional[str]
     resource_id: Optional[UUID] = None
     ip_address: Optional[str] = None
     detail: Optional[str] = None
@@ -178,3 +182,5 @@ class CommentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+

@@ -9,9 +9,21 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from fastapi.security import OAuth2PasswordRequestForm
 import auth
-from vault_client import write_secret_to_vault, read_secret_from_vault
+from vault_client import write_secret_to_vault, read_secret_from_vault, read_secret_history_from_vault
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+
 
 app = FastAPI(title="SecureConnect API")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # React'in çalıştığı adres
+    allow_credentials=True,
+    allow_methods=["*"], # POST, GET her şeye izin ver
+    allow_headers=["*"],
+)
 
 def get_db():
     db = SessionLocal()
@@ -445,8 +457,16 @@ def create_sap_user(
     # 3. Vault için benzersiz bir yol (path) oluştur (Örn: sap_users/1234-5678-uuid)
     secret_path = f"sap_users/{str(db_user.id)}"
 
-    # 4. Şifreyi Vault'a gönder
-    write_secret_to_vault(path=secret_path, secret_data={"password": user_data.password})
+    # Vault yazma işlemini sıkı denetime alıyoruz
+    try:
+        # Eğer write_secret_to_vault kendi içinde hatayı yutuyorsa bu try/except işe yaramaz.
+        # O fonksiyonun içine de bakıp "raise" ettiğinden emin olmak iyi olabilir.
+        write_secret_to_vault(path=secret_path, secret_data={"password": user_data.password})
+    except Exception as e:
+        # Vault çökerse, DB'ye eklediğimiz yetim kullanıcıyı silip işlemi iptal ediyoruz
+        db.delete(db_user)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Vault Hatası: Şifre kasaya yazılamadı! Detay: {str(e)}")
 
     # 5. Vault yolunu DB'deki kullanıcıya kaydet
     db_user.vault_secret_path = secret_path
@@ -546,6 +566,72 @@ def copy_sap_user_password(
     _log_audit(db, current_user, "PASSWORD_COPIED", "sap_user", db_user.id, request)
 
     return {"password": password, "last_modified_date": db_user.last_modified_date}
+
+from datetime import datetime
+
+@app.post("/sap-users/{user_id}/update-password")
+def update_sap_user_password(
+    user_id: str,
+    data: schemas.PasswordUpdateCreate,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    # 1. Rol Kontrolü: Sadece Admin
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Sadece Admin rolü şifre güncelleyebilir.")
+
+    # 2. Kullanıcıyı Bul
+    db_user = db.query(models.SapUser).filter(models.SapUser.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="SAP kullanıcısı bulunamadı.")
+
+    # 3. Vault'a Yeni Versiyon Yaz
+    try:
+        # KV v2 aynı yola yazıldığında otomatik versiyon atlatır
+        write_secret_to_vault(path=db_user.vault_secret_path, secret_data={"password": data.new_password})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Vault'a yazılamadı: {str(e)}")
+
+    # 4. Veritabanında Son Değiştirme Tarihini Güncelle
+    db_user.updated_at = datetime.utcnow()
+    db.commit()
+
+    # 5. Audit Log (ŞİFREYİ ASLA LOGLAMA, SADECE NEDENİ YAZ)
+    audit_log = models.AuditLog(
+        user_id=current_user.id,
+        action="PASSWORD_UPDATED",
+        resource_type="SapUser",
+        resource_id=db_user.id,
+        detail=f"Değişiklik Nedeni: {data.reason}" 
+    )
+    db.add(audit_log)
+    db.commit()
+
+    return {"message": "Şifre başarıyla güncellendi ve yeni versiyon oluşturuldu."}
+
+@app.get("/sap-users/{user_id}/password-history")
+def get_password_history(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Geçmiş şifreleri sadece Admin görebilir.")
+
+    db_user = db.query(models.SapUser).filter(models.SapUser.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı.")
+
+    try:
+        history_data = read_secret_history_from_vault(path=db_user.vault_secret_path, limit=3)
+        
+        return {
+            "sap_user_id": user_id,
+            "vault_path": db_user.vault_secret_path,
+            "history": history_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
 # YORUMLAR (Comment) — polimorfik, tarihçeli
@@ -649,3 +735,52 @@ def delete_comment(
     db.delete(db_comment)
     db.commit()
     return {"message": "Yorum silindi."}
+
+
+# ==========================================
+# AUDIT LOG
+# ==========================================
+
+@app.get("/audit-logs/", response_model=List[schemas.AuditLogResponse])
+def get_audit_logs(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    # Sadece Admin kontrolü
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Audit loglarını sadece Admin görebilir.")
+
+    # id UUID olduğu için sıralamayı zamana (created_at) göre yapıyoruz
+    logs = db.query(models.AuditLog)\
+             .order_by(models.AuditLog.created_at.desc())\
+             .offset(skip)\
+             .limit(limit)\
+             .all()
+             
+    return logs
+
+from uuid import UUID
+from fastapi import HTTPException, Depends
+
+@app.delete("/audit-logs/{log_id}")
+def delete_audit_log(
+    log_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    # 1. Sadece Admin silebilir
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Audit loglarını sadece Admin silebilir.")
+
+    # 2. Log kaydını bul
+    log_entry = db.query(models.AuditLog).filter(models.AuditLog.id == log_id).first()
+    if not log_entry:
+        raise HTTPException(status_code=404, detail="Log kaydı bulunamadı.")
+
+    # 3. Veritabanından sil ve işlemi onayla
+    db.delete(log_entry)
+    db.commit()
+
+    return {"message": "Log kaydı başarıyla silindi."}
