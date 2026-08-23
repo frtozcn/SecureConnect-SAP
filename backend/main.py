@@ -485,7 +485,7 @@ def _get_allowed_customer_ids(current_user: models.PlatformUser) -> list[str]:
     return [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
 
 
-def _get_sap_user_or_404(db: Session, user_id: str) -> models.SapUser:
+def _get_sap_user_or_404(db: Session, user_id: UUID) -> models.SapUser:
     db_user = db.query(models.SapUser).filter(models.SapUser.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="SAP kullanıcısı bulunamadı.")
@@ -519,7 +519,7 @@ def _log_audit(db: Session, current_user: models.PlatformUser, action: str,
 
 @app.post("/sap-users/{user_id}/reveal-password", response_model=schemas.SapUserPasswordResponse)
 def reveal_sap_user_password(
-    user_id: str,
+    user_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
@@ -548,7 +548,7 @@ def reveal_sap_user_password(
 
 @app.post("/sap-users/{user_id}/copy-password", response_model=schemas.SapUserPasswordResponse)
 def copy_sap_user_password(
-    user_id: str,
+    user_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
@@ -571,7 +571,7 @@ from datetime import datetime
 
 @app.post("/sap-users/{user_id}/update-password")
 def update_sap_user_password(
-    user_id: str,
+    user_id: UUID,
     data: schemas.PasswordUpdateCreate,
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
@@ -611,7 +611,7 @@ def update_sap_user_password(
 
 @app.get("/sap-users/{user_id}/password-history")
 def get_password_history(
-    user_id: str,
+    user_id: UUID,
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
@@ -761,26 +761,3 @@ def get_audit_logs(
              
     return logs
 
-from uuid import UUID
-from fastapi import HTTPException, Depends
-
-@app.delete("/audit-logs/{log_id}")
-def delete_audit_log(
-    log_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
-):
-    # 1. Sadece Admin silebilir
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Audit loglarını sadece Admin silebilir.")
-
-    # 2. Log kaydını bul
-    log_entry = db.query(models.AuditLog).filter(models.AuditLog.id == log_id).first()
-    if not log_entry:
-        raise HTTPException(status_code=404, detail="Log kaydı bulunamadı.")
-
-    # 3. Veritabanından sil ve işlemi onayla
-    db.delete(log_entry)
-    db.commit()
-
-    return {"message": "Log kaydı başarıyla silindi."}
