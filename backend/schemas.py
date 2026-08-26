@@ -162,6 +162,8 @@ class AuditLogResponse(BaseModel):
     action: str
     resource_type: Optional[str]
     resource_id: Optional[UUID] = None
+    target_name: Optional[str] = None
+    target_context: Optional[str] = None
     ip_address: Optional[str] = None
     detail: Optional[str] = None
     created_at: datetime

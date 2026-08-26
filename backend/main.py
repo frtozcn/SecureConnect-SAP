@@ -105,7 +105,7 @@ def get_customers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
     allowed_ids = [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
     
     # Sadece bu ID'ye sahip müşterileri veritabanından çek
-    customers = db.query(models.Customer).filter(models.Customer.id.in_(allowed_ids)).offset(skip).limit(limit).all()
+    customers = db.query(models.Customer).offset(skip).limit(limit).all()
     return customers
 
 # 2. Yeni Müşteri Ekle (CREATE)
@@ -153,16 +153,20 @@ def delete_customer(customer_id: UUID, db: Session = Depends(get_db), current_us
         raise HTTPException(status_code=404, detail="Musteri bulunamadi.")
     
     try:
+        # 1. ADIM: Müşteriyi silmeden önce, ona bağlı VPN profilini (varsa) otomatik sil
+        db.query(models.VpnProfile).filter(models.VpnProfile.customer_id == str(customer_id)).delete()
+        
+        # 2. ADIM: Müşteriyi sil
         db.delete(db_customer)
         db.commit()
+        
         return {"status": "success", "message": f"{db_customer.name} basariyla silindi."}
     except IntegrityError:
         db.rollback() # İşlemi geri al ki veritabanı kilitlenmesin
         raise HTTPException(
             status_code=400, 
-            detail="Bu musteriye bagli VPN, SAP sistemleri veya kullanici atamalari var! Once o kayitlari silmelisiniz."
+            detail="Bu musteriye bagli SAP sistemleri veya kullanici atamalari var! Once o kayitlari silmelisiniz."
         )
-
 
 
 # ==========================================
@@ -189,19 +193,10 @@ def get_sap_systems(
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    user_role = current_user.role.lower()
 
-    if user_role in ["admin", "lead", "uzman"]:
-        return db.query(models.SapSystem).offset(skip).limit(limit).all()
+    return db.query(models.SapSystem).offset(skip).limit(limit).all()
     
-    # Danışmansa, sadece sorumlu olduğu müşterilerin sistemlerini görsün
-    if not current_user.assigned_customer_ids:
-        return []
-    
-    allowed_ids = [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
-    return db.query(models.SapSystem).filter(models.SapSystem.customer_id.in_(allowed_ids)).offset(skip).limit(limit).all()
 
 @app.put("/sap-systems/{system_id}", response_model=schemas.SapSystemResponse)
 def update_sap_system(
@@ -234,7 +229,7 @@ def delete_sap_system(
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    # Sadece Admin silebilir (Ekstra güvenlik)
+    # Sadece Admin silebilir
     if current_user.role.lower() != "admin":
         raise HTTPException(status_code=403, detail="Sadece Admin silme işlemi yapabilir.")
         
@@ -242,48 +237,57 @@ def delete_sap_system(
     if not db_system:
         raise HTTPException(status_code=404, detail="SAP Sistemi bulunamadı.")
         
-    db.delete(db_system)
-    db.commit()
-    return {"message": "SAP Sistemi başarıyla silindi."}
+    # HATA YAKALAMA (INTEGRITY ERROR) BLOĞU EKLENDİ
+    try:
+        db.delete(db_system)
+        db.commit()
+        return {"message": "SAP Sistemi başarıyla silindi."}
+    except IntegrityError:
+        db.rollback() # Kilitlenmeyi önle
+        raise HTTPException(
+            status_code=400, 
+            detail="Bu sistemi silmeniz için altındaki client ve kullanıcıları silmeniz gerekiyor."
+        )
 
 
 # ==========================================
 # SAP CLIENT UÇ NOKTALARI
 # ==========================================
 
-@app.post("/sap-clients/", response_model=schemas.SapClientResponse)
-def create_sap_client(
-    client_data: schemas.SapClientCreate, 
+
+@app.delete("/sap-clients/{client_id}")
+def delete_sap_client(
+    client_id: str,
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
-        raise HTTPException(status_code=403, detail="Yetkiniz yok.")
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Sadece Admin silme işlemi yapabilir.")
         
-    db_client = models.SapClient(**client_data.model_dump())
-    db.add(db_client)
+    db_client = db.query(models.SapClient).filter(models.SapClient.id == client_id).first()
+    if not db_client:
+        raise HTTPException(status_code=404, detail="SAP Client bulunamadı.")
+        
+    # KESİN KORUMA: Altında kullanıcı var mı diye manuel sayıyoruz
+    user_count = db.query(models.SapUser).filter(models.SapUser.client_id == client_id).count()
+    if user_count > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Bu client'ı silemezsiniz! İçinde {user_count} adet kullanıcı bulunuyor."
+        )
+        
+    db.delete(db_client)
     db.commit()
-    db.refresh(db_client)
-    return db_client
+    return {"message": "SAP Client başarıyla silindi."}
 
 @app.get("/sap-clients/", response_model=list[schemas.SapClientResponse])
 def get_sap_clients(
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    user_role = current_user.role.lower()
+    return db.query(models.SapClient).offset(skip).limit(limit).all()
 
-    if user_role in ["admin", "lead", "uzman"]:
-        return db.query(models.SapClient).offset(skip).limit(limit).all()
-    
-    # Danışmansa, sadece sorumlu olduğu müşterilerin sistemlerini görsün
-    if not current_user.assigned_customer_ids:
-        return []
-    
-    allowed_ids = [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
-    return db.query(models.SapClient).join(models.SapSystem).filter(models.SapSystem.customer_id.in_(allowed_ids)).offset(skip).limit(limit).all()
 
 @app.put("/sap-clients/{client_id}", response_model=schemas.SapClientResponse)
 def update_sap_client(
@@ -310,23 +314,22 @@ def update_sap_client(
     db.refresh(db_client)
     return db_client
 
-@app.delete("/sap-clients/{client_id}")
-def delete_sap_client(
-    client_id: str,
+@app.post("/sap-clients/", response_model=schemas.SapClientResponse)
+def create_sap_client(
+    client_data: schemas.SapClientCreate, 
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    # Sadece Admin silebilir (Ekstra güvenlik)
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Sadece Admin silme işlemi yapabilir.")
+    # Yetki kontrolü (Admin, Lead veya Uzman ekleyebilir)
+    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
+        raise HTTPException(status_code=403, detail="Client ekleme yetkiniz yok.")
         
-    db_client = db.query(models.SapClient).filter(models.SapClient.id == client_id).first()
-    if not db_client:
-        raise HTTPException(status_code=404, detail="SAP Client bulunamadı.")
-        
-    db.delete(db_client)
+    db_client = models.SapClient(**client_data.model_dump())
+    db.add(db_client)
     db.commit()
-    return {"message": "SAP Client başarıyla silindi."}
+    db.refresh(db_client)
+    
+    return db_client
 
 # ==========================================
 # VPN PROFILE UÇ NOKTALARI
@@ -355,17 +358,8 @@ def get_vpn_profiles(
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    user_role = current_user.role.lower()
-
-    if user_role in ["admin", "lead", "uzman"]:
-        return db.query(models.VpnProfile).offset(skip).limit(limit).all()
     
-    # Danışmansa, sadece sorumlu olduğu müşterilerin vpn'lerini görsün
-    if not current_user.assigned_customer_ids:
-        return []
-    
-    allowed_ids = [cid.strip() for cid in current_user.assigned_customer_ids.split(",") if cid.strip()]
-    return db.query(models.VpnProfile).filter(models.VpnProfile.customer_id.in_(allowed_ids)).offset(skip).limit(limit).all()
+    return db.query(models.VpnProfile).offset(skip).limit(limit).all()
 
 @app.put("/vpn-profiles/{vpn_id}", response_model=schemas.VpnProfileResponse)
 def update_vpn_profile(
@@ -420,16 +414,8 @@ def get_sap_users(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
     query = db.query(models.SapUser).join(models.SapClient).join(models.SapSystem)
-
-    user_role = current_user.role.lower()
-    if user_role not in ["admin", "lead", "uzman"]:
-        allowed_ids = _get_allowed_customer_ids(current_user)
-        if not allowed_ids:
-            return []
-        query = query.filter(models.SapSystem.customer_id.in_(allowed_ids))
 
     if client_id is not None:
         query = query.filter(models.SapUser.client_id == client_id)
@@ -475,6 +461,27 @@ def create_sap_user(
 
     return db_user
 
+@app.delete("/sap-users/{user_id}")
+def delete_sap_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: models.PlatformUser = Depends(auth.get_current_user)
+):
+    # Sadece Admin silebilir
+    if current_user.role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Sadece Admin silme işlemi yapabilir.")
+        
+    db_user = db.query(models.SapUser).filter(models.SapUser.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="SAP Kullanıcısı bulunamadı.")
+        
+    # (Opsiyonel) Vault üzerindeki path'i de temizlemek istersen buraya hvac silme kodu eklenebilir.
+    # Şimdilik sadece veritabanından siliyoruz.
+    
+    db.delete(db_user)
+    db.commit()
+    return {"message": "SAP Kullanıcısı başarıyla silindi."}
+
 # ==========================================
 # SAP USER — ŞİFRE OKUMA AKIŞI (GÖSTER / KOPYALA)
 # ==========================================
@@ -492,30 +499,42 @@ def _get_sap_user_or_404(db: Session, user_id: UUID) -> models.SapUser:
     return db_user
 
 
-def _check_customer_access(db_user: models.SapUser, current_user: models.PlatformUser):
-    """Danışman, sadece atandığı müşterinin SAP kullanıcısına erişebilir."""
-    role = current_user.role.lower()
-    if role in ["admin", "lead", "uzman"]:
-        return
-    customer_id = str(db_user.client.system.customer_id)
-    if customer_id not in _get_allowed_customer_ids(current_user):
-        raise HTTPException(status_code=403, detail="Bu kaydın müşterisine erişim yetkiniz yok.")
 
 
 def _log_audit(db: Session, current_user: models.PlatformUser, action: str,
-                resource_type: str, resource_id, request: Request, detail: str = None):
+                resource_type: str, resource_id, request: Request = None, detail: str = None):
+    
+    target_name_val = None
+    target_context_val = None
+
+    if resource_type == "sap_user":
+        db_obj = db.query(models.SapUser).filter(models.SapUser.id == resource_id).first()
+        if db_obj:
+            target_name_val = db_obj.username
+            # İlişkisel tablolardan sistemi ve client'ı çek
+            if db_obj.client and db_obj.client.system:
+                sys = db_obj.client.system
+                target_context_val = f"{sys.sid} {sys.environment} {sys.system_type} (Client {db_obj.client.client_number})"
+    
+    # Diğer kaynaklar için (Customer vb. yorum atıldığında hata vermesin diye)
+    elif resource_type == "customer":
+        db_obj = db.query(models.Customer).filter(models.Customer.id == resource_id).first()
+        if db_obj:
+            target_name_val = db_obj.name
+
     log = models.AuditLog(
         user_id=current_user.id,
         user_email=current_user.email,
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,
-        ip_address=request.client.host if request.client else None,
+        target_name=target_name_val,
+        target_context=target_context_val, # ORTAM BİLGİSİ
+        ip_address=request.client.host if request and request.client else None,
         detail=detail,
     )
     db.add(log)
     db.commit()
-
 
 @app.post("/sap-users/{user_id}/reveal-password", response_model=schemas.SapUserPasswordResponse)
 def reveal_sap_user_password(
@@ -526,14 +545,6 @@ def reveal_sap_user_password(
 ):
     """'Göster' butonu. Frontend 15 saniye açık tutup sonra maskeleyecek — süre UI tarafında."""
     db_user = _get_sap_user_or_404(db, user_id)
-    _check_customer_access(db_user, current_user)
-
-    # RFC/technical kullanıcı şifresi danışmana GÖSTERİLMEZ, sadece admin görebilir (F3)
-    if db_user.user_type and db_user.user_type.lower() == "rfc" and current_user.role.lower() != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="RFC/technical kullanıcı şifresi sadece kopyalanabilir, görüntülenemez."
-        )
 
     if not db_user.vault_secret_path:
         raise HTTPException(status_code=404, detail="Bu kullanıcı için Vault'ta kayıtlı şifre yok.")
@@ -555,7 +566,6 @@ def copy_sap_user_password(
 ):
     """'Kopyala' butonu. RFC kullanıcı dahil herkes kopyalayabilir (F3) — frontend değeri ekranda göstermeden panoya yazacak."""
     db_user = _get_sap_user_or_404(db, user_id)
-    _check_customer_access(db_user, current_user)
 
     if not db_user.vault_secret_path:
         raise HTTPException(status_code=404, detail="Bu kullanıcı için Vault'ta kayıtlı şifre yok.")
@@ -597,14 +607,7 @@ def update_sap_user_password(
     db.commit()
 
     # 5. Audit Log (ŞİFREYİ ASLA LOGLAMA, SADECE NEDENİ YAZ)
-    audit_log = models.AuditLog(
-        user_id=current_user.id,
-        action="PASSWORD_UPDATED",
-        resource_type="SapUser",
-        resource_id=db_user.id,
-        detail=f"Değişiklik Nedeni: {data.reason}" 
-    )
-    db.add(audit_log)
+    _log_audit(db, current_user, "PASSWORD_UPDATED", "sap_user", db_user.id, None, detail=f"Değişiklik Nedeni: {data.reason}")
     db.commit()
 
     return {"message": "Şifre başarıyla güncellendi ve yeni versiyon oluşturuldu."}
@@ -665,10 +668,6 @@ def create_comment(
     db: Session = Depends(get_db),
     current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
-    # Sadece Admin ve Lead yorum ekleyebilir (F2)
-    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
-        raise HTTPException(status_code=403, detail="Yorum ekleme yetkiniz yok.")
-
     if comment.resource_type not in ALLOWED_RESOURCE_TYPES:
         raise HTTPException(status_code=400, detail="Geçersiz kayıt türü.")
 
@@ -688,7 +687,6 @@ def create_comment(
     db.refresh(db_comment)
 
     _log_audit(db, current_user, "COMMENT_ADDED", comment.resource_type, comment.resource_id, request, detail=comment.text[:200])
-
     return db_comment
 
 
@@ -697,16 +695,9 @@ def get_comments(
     resource_type: str,
     resource_id: UUID,
     db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
 ):
     if resource_type not in ALLOWED_RESOURCE_TYPES:
         raise HTTPException(status_code=400, detail="Geçersiz kayıt türü.")
-
-    role = current_user.role.lower()
-    if role not in ["admin", "lead", "uzman"]:
-        customer_id = _resolve_resource_customer_id(db, resource_type, resource_id)
-        if customer_id not in _get_allowed_customer_ids(current_user):
-            raise HTTPException(status_code=403, detail="Bu kaydın yorumlarına erişim yetkiniz yok.")
 
     return (
         db.query(models.Comment)

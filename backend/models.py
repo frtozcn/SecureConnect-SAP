@@ -98,6 +98,8 @@ class AuditLog(Base):
     action = Column(String(100))      # PASSWORD_VIEWED, PASSWORD_COPIED, LOGIN, ...
     resource_type = Column(String(50))   # "sap_user", "vpn_profile" vb.
     resource_id = Column(UUID(as_uuid=True), nullable=True)
+    target_name = Column(String(255), nullable=True)
+    target_context = Column(String(255), nullable=True)
     ip_address = Column(String(45))      # IPv6 için 45 karakter yeter
     detail = Column(Text, nullable=True) # ŞİFRE ASLA BURAYA YAZILMAYACAK
     created_at = Column(DateTime, default=datetime.utcnow)
