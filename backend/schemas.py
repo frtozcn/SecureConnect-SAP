@@ -36,9 +36,11 @@ class CustomerResponse(CustomerBase):
 # ==========================================
 class VpnProfileBase(BaseModel):
     vpn_type: Optional[str] = None # OpenVPN, IPsec vb.
-    vpn_address: Optional[str] = None
+    gateway_address: Optional[str] = None
     description: Optional[str] = None
     comment: Optional[str] = None
+    vpn_username: Optional[str] = None
+    vpn_password: Optional[str] = None
 
 class VpnProfileCreate(VpnProfileBase):
     customer_id: UUID
@@ -48,6 +50,8 @@ class VpnProfileUpdate(BaseModel):
     vpn_address: Optional[str] = None
     description: Optional[str] = None
     comment: Optional[str] = None
+    vpn_username: Optional[str] = None
+    vpn_password: Optional[str] = None
 
 class VpnProfileResponse(VpnProfileBase):
     id: UUID
@@ -62,6 +66,8 @@ class VpnProfileResponse(VpnProfileBase):
 # ==========================================
 class SapSystemBase(BaseModel):
     system_type: str # S/4HANA, ECC 6.0 vb.
+    environment: str
+    instance_number: str
     app_server: Optional[str] = None
     description: Optional[str] = None
     comment: Optional[str] = None

@@ -8,6 +8,7 @@ export default function ConsultantDashboard({ token }) {
   const [selectedSystem, setSelectedSystem] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,24 +69,42 @@ export default function ConsultantDashboard({ token }) {
     }
   };
 
-  const filteredCustomers = customers.filter(customer => {
-    const searchLower = searchTerm.toLowerCase();
-    
-    // Veritabanından null veya undefined gelebilecek alanları ( || '' ) ile korumaya alıyoruz
-    const matchName = (customer.name || '').toLowerCase().includes(searchLower);
-    
-    const matchSid = (customer.systems || []).some(sys => 
-      (sys.sid || '').toLowerCase().includes(searchLower)
-    );
-    
-    const matchUser = (customer.systems || []).some(sys => 
-      (sys.clients || []).some(cli => 
-        (cli.users || []).some(usr => (usr.username || '').toLowerCase().includes(searchLower))
-      )
-    );
-    
-    return matchName || matchSid || matchUser;
-  });
+  // --- AKILLI OMNI-SEARCH FİLTRESİ ---
+  const filteredCustomers = customers.map(customer => {
+    // 1. Arama kutusu boşsa müşteriyi olduğu gibi (tüm verileriyle) bırak
+    if (!searchTerm.trim()) return customer;
+
+    // 2. Kullanıcının yazdığını küçük harfe çevir ve boşluklardan kelimelere böl 
+    // Örn: "s/4HANA dev 100" -> ["s/4hana", "dev", "100"]
+    const keywords = searchTerm.toLowerCase().trim().split(/\s+/);
+
+    // 3. İç İçe Ağaç Filtrelemesi (Sistem -> Client -> Kullanıcı)
+    const filteredSystems = customer.systems.map(sys => {
+      const filteredClients = sys.clients.map(cli => {
+        const filteredUsers = cli.users.filter(usr => {
+           // ARAMA HAVUZU: Bu satırdaki kullanıcının tüm "soy ağacını" tek bir metne döküyoruz
+           const searchPool = `
+             ${customer.name || ''} 
+             ${sys.sid || ''} ${sys.system_type || ''} ${sys.environment || ''} ${sys.description || ''}
+             ${cli.client_number || ''} 
+             ${usr.username || ''} ${usr.user_type || ''}
+           `.toLowerCase();
+
+           // Kullanıcı havuzu, kullanıcının arama kutusuna yazdığı TÜM kelimeleri içeriyor mu? (AND Mantığı)
+           return keywords.every(kw => searchPool.includes(kw));
+        });
+
+        // Sadece aranan kelimelerle eşleşen kullanıcıları tut
+        return { ...cli, users: filteredUsers };
+      }).filter(cli => cli.users.length > 0); // İçi boşalan (kullanıcısı eşleşmeyen) client'ları listeden çıkar
+
+      // Sadece içi dolu client'ı olan sistemleri tut
+      return { ...sys, clients: filteredClients };
+    }).filter(sys => sys.clients.length > 0); // İçi boşalan sistemleri listeden çıkar
+
+    // Yeni filtrelenmiş (daraltılmış) sistemleri müşteriye ata
+    return { ...customer, systems: filteredSystems };
+  }).filter(customer => customer.systems.length > 0); // Aramayla eşleşen hiçbir sistemi kalmayan müşteriyi sol menüden gizle
 
   if (loading) return <div style={{ padding: '50px', textAlign: 'center' }}>Sistemler yükleniyor...</div>;
 

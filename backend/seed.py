@@ -85,7 +85,9 @@ def seed_data():
                     customer_id=customer.id,
                     vpn_type=row["vpn_type"],
                     gateway_address=row["vpn_gateway"],
-                    vault_secret_path=vault_path
+                    vault_secret_path=vault_path,
+                    vpn_username=vpn_secrets["user_1"],
+                    vpn_password=vpn_secrets["pass_1"]
                 )
                 db.add(vpn_profile)
         db.commit()

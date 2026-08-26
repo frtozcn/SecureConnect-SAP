@@ -23,7 +23,6 @@ class Customer(Base):
     description = Column(Text)
     comment = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
     vpn_profile = relationship("VpnProfile", back_populates="customer", uselist=False)
     sap_systems = relationship("SapSystem", back_populates="customer")
 
@@ -33,6 +32,8 @@ class VpnProfile(Base):
     customer_id = Column(UUID(as_uuid=True), ForeignKey("customers.id"))
     vpn_type = Column(String(100))
     gateway_address = Column(String(255))
+    vpn_username = Column(String, nullable=True)
+    vpn_password = Column(String, nullable=True)
     vault_secret_path = Column(String(255)) # Şifre Vault'ta durur, burada sadece yolu var
     config_file_url = Column(String(255))
     instructions = Column(Text)

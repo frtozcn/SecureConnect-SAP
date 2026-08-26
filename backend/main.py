@@ -110,7 +110,7 @@ def get_customers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
 
 # 2. Yeni Müşteri Ekle (CREATE)
 @app.post("/customers/", response_model=schemas.CustomerResponse)
-def create_customer(customer: schemas.CustomerCreate, db: Session = Depends(get_db), current_user: models.PlatformUser = Depends(auth.RoleChecker(["admin", "uzman"]))):
+def create_customer(customer: schemas.CustomerCreate, db: Session = Depends(get_db), current_user: models.PlatformUser = Depends(auth.get_current_user)):
     # Aynı isimde müşteri var mı kontrolü
     existing_customer = db.query(models.Customer).filter(models.Customer.name == customer.name).first()
     if existing_customer:
@@ -146,7 +146,7 @@ def update_customer(customer_id: UUID, customer_update: schemas.CustomerUpdate, 
         
 # 4. Müşteri Sil (DELETE)
 @app.delete("/customers/{customer_id}")
-def delete_customer(customer_id: UUID, db: Session = Depends(get_db), current_user: models.PlatformUser = Depends(auth.RoleChecker(["admin"]))):
+def delete_customer(customer_id: UUID, db: Session = Depends(get_db), current_user: models.PlatformUser = Depends(auth.get_current_user)):
     db_customer = db.query(models.Customer).filter(models.Customer.id == customer_id).first()
     
     if not db_customer:
