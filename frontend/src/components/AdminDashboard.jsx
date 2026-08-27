@@ -227,6 +227,23 @@ const UserCredentialCard = ({ user, token, handleUpdatePassword, handleDeleteUse
     'Content-Type': 'application/json'
   };
 
+  // ⏱️ YENİ EKLENEN KISIM: 10 Saniye Sonra Otomatik Gizleme
+  useEffect(() => {
+    let timeoutId;
+    // Eğer şifre görünür durumdaysa sayacı başlat
+    if (showPassword) {
+      timeoutId = setTimeout(() => {
+        setShowPassword(false);
+      }, 10000); // 10000 milisaniye = 10 saniye
+    }
+    // Component kapanırsa veya kullanıcı 10 saniye dolmadan göz ikonuna basıp kapatırsa sayacı temizle
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [showPassword]);
+
   const handleToggleVisibility = async (e) => {
     e.preventDefault(); 
     if (!password) {
@@ -338,27 +355,29 @@ export default function AdminDashboard({ token, userRole }) {
   const [editableCustomerData, setEditableCustomerData] = useState(null);
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
   const [newCustomerData, setNewCustomerData] = useState({ name: '', sector: '', description: '' });
+  
   const [isAddingSystem, setIsAddingSystem] = useState(false);
   const [selectedCustomerForSystem, setSelectedCustomerForSystem] = useState(null);
+  
+  // DÜZELTME: client_number eklendi, description kaldırıldı (system_type kullanıyoruz)
   const [newSystemData, setNewSystemData] = useState({
-    sid: '', system_type: '', environment: '', app_server: '', instance_number: '', sap_router: '', description: ''
+    sid: '', system_type: '', client_number: '', environment: 'PRD', app_server: '', instance_number: '00', sap_router: ''
   });
+
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
   const [activeNoteResource, setActiveNoteResource] = useState({ type: '', id: '', name: '' });
   const [notesList, setNotesList] = useState([]);
   const [newNoteText, setNewNoteText] = useState('');
-  const [isAddingClient, setIsAddingClient] = useState(false);
-  const [selectedSystemForClient, setSelectedSystemForClient] = useState(null);
-  const [newClientData, setNewClientData] = useState({ client_number: '' });
-  const [selectedClientDetails, setSelectedClientDetails] = useState(null);
-  const [editableClientData, setEditableClientData] = useState(null);
+
+
   const [isAddingUser, setIsAddingUser] = useState(false);
-  const [selectedClientForUser, setSelectedClientForUser] = useState(null);
-  const [newUserData, setNewUserData] = useState({ username: '', password: '', user_type: 'DIALOG' });
+  const [selectedSystemForUser, setSelectedSystemForUser] = useState(null); 
+  
+  const [newUserData, setNewUserData] = useState({ username: '', password: '', user_type: '' });
   const [selectedSystemDetails, setSelectedSystemDetails] = useState(null); 
   const [isEditingSystem, setIsEditingSystem] = useState(false); 
-  const [editableSystemData, setEditableSystemData] = useState(null); 
+  const [editableSystemData, setEditableSystemData] = useState(null);
 
 
   const handleDeleteUser = async (userId, username) => {
@@ -377,42 +396,7 @@ export default function AdminDashboard({ token, userRole }) {
     }
   };
 
-  const handleApplyClientChanges = async () => {
-    try {
-      const res = await fetch(`http://localhost:8000/sap-clients/${editableClientData.id}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ client_number: editableClientData.client_number })
-      });
-      if (res.ok) {
-        alert("Client başarıyla güncellendi!");
-        setSelectedClientDetails(null);
-        fetchCustomers();
-      } else {
-        const errorData = await res.json();
-        alert(`Güncelleme başarısız oldu: ${errorData.detail || 'Bilinmeyen hata'}`);
-      }
-    } catch (error) {
-      console.error("Client güncelleme hatası:", error);
-    }
-  };
 
-  const handleDeleteClient = async () => {
-    if (!confirm(`"Client ${editableClientData.client_number}" silinecek. Emin misiniz?`)) return;
-    try {
-      const res = await fetch(`http://localhost:8000/sap-clients/${editableClientData.id}`, { method: 'DELETE', headers });
-      if (res.ok) {
-        alert("Client başarıyla silindi.");
-        setSelectedClientDetails(null);
-        fetchCustomers();
-      } else {
-        const errorData = await res.json();
-        alert(`Silme başarısız: ${errorData.detail}`);
-      }
-    } catch (error) {
-      console.error("Client silme hatası:", error);
-    }
-  };
  
   const fetchNotes = async (type, id) => {
     try {
@@ -501,18 +485,27 @@ export default function AdminDashboard({ token, userRole }) {
  
   const fetchCustomers = async () => {
     try {
-      const [custRes, sysRes, cliRes, usrRes, vpnRes] = await Promise.all([
+      const [custRes, sysRes, usrRes, vpnRes] = await Promise.all([
         fetch('http://localhost:8000/customers/', { headers }),
         fetch('http://localhost:8000/sap-systems/', { headers }),
-        fetch('http://localhost:8000/sap-clients/', { headers }),
         fetch('http://localhost:8000/sap-users/', { headers }),
         fetch('http://localhost:8000/vpn-profiles/', { headers })
       ]);
  
-      if (custRes.ok && sysRes.ok && cliRes.ok && usrRes.ok) {
+      // 🚨 OTURUM KONTROLÜ (401 YAKALAYICI) BURAYA EKLENİYOR 🚨
+      if (custRes.status === 401 || sysRes.status === 401 || usrRes.status === 401) {
+        alert("Oturum süreniz dolmuştur. Güvenliğiniz için lütfen tekrar giriş yapın.");
+        
+        // Varsa sizin projenizdeki çıkış yapma fonksiyonunu (handleLogout) çağırabilirsiniz.
+        // Yoksa en temiz yöntem token'ı silip sayfayı yenilemektir:
+        localStorage.removeItem('token'); 
+        window.location.reload(); 
+        return; // Fonksiyonun geri kalanını çalıştırma
+      }
+
+      if (custRes.ok && sysRes.ok && usrRes.ok) {
         const custData = await custRes.json();
         const sysData = await sysRes.json();
-        const cliData = await cliRes.json();
         const usrData = await usrRes.json();
         const vpnData = await (vpnRes.ok ? vpnRes.json() : []);
  
@@ -520,11 +513,8 @@ export default function AdminDashboard({ token, userRole }) {
           const vpn = vpnData.find ? vpnData.find(v => v.customer_id === customer.id) : null;
           
           const systems = sysData ? sysData.filter(s => s.customer_id === customer.id).map(sys => {
-            const clients = cliData ? cliData.filter(c => c.system_id === sys.id).map(cli => {
-              const users = usrData ? usrData.filter(u => u.client_id === cli.id) : [];
-              return { ...cli, users };
-            }) : [];
-            return { ...sys, clients };
+            const users = usrData ? usrData.filter(u => u.system_id === sys.id) : [];
+            return { ...sys, users };
           }) : [];
           
           return { ...customer, vpn: vpn || null, systems: systems || [] };
@@ -538,9 +528,16 @@ export default function AdminDashboard({ token, userRole }) {
   };
  
   const fetchAuditLogs = async () => {
-    setIsRefreshingLogs(true);
     try {
       const res = await fetch('http://localhost:8000/audit-logs/?limit=50', { headers });
+      
+      // 🚨 OTURUM KONTROLÜ 🚨
+      if (res.status === 401) {
+        alert("Oturum süreniz dolmuştur. Lütfen tekrar giriş yapın.");
+        localStorage.removeItem('token');
+        window.location.reload();
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setAuditLogs(Array.isArray(data) ? data : []);
@@ -629,49 +626,48 @@ export default function AdminDashboard({ token, userRole }) {
  
   const filteredCustomers = customers.map(customer => {
     if (!searchTerm.trim()) return customer;
-
     const keywords = searchTerm.toLowerCase().trim().split(/\s+/);
 
     const filteredSystems = (customer.systems || []).map(sys => {
-      const filteredClients = (sys.clients || []).map(cli => {
-        const filteredUsers = (cli.users || []).filter(usr => {
+      // 1. Sistemin kendi bilgilerini (Müşteri adı dahil) bir arama havuzunda topla
+      let envExpanded = (sys.environment || '').toLowerCase();
+      if (envExpanded === 'prd') envExpanded += ' canlı canli üretim uretim';
+      else if (envExpanded === 'qas') envExpanded += ' qa test kalite';
+      else if (envExpanded === 'dev') envExpanded += ' dev geliştirme gelistirme';
 
-          let envExpanded = (sys.environment || '').toLowerCase();
-          if (envExpanded === 'prd') envExpanded += ' canlı canli üretim uretim';
-          else if (envExpanded === 'qas') envExpanded += ' qa test kalite';
-          else if (envExpanded === 'dev') envExpanded += ' dev geliştirme gelistirme';
+      const systemSearchPool = `
+        ${customer.name || ''} 
+        ${sys.sid || ''} ${sys.system_type || ''} ${envExpanded} 
+        ${sys.client_number || ''}
+      `.toLowerCase();
 
-          const searchPool = `
-             ${customer.name || ''} 
-             ${sys.sid || ''} ${sys.system_type || ''} ${envExpanded} ${sys.description || ''}
-             ${cli.client_number || ''} 
-             ${usr.username || ''} ${usr.user_type || ''}
-           `.toLowerCase();
+      // 2. Sistem (veya müşteri) aranan kelimelerin tamamını tek başına karşılıyor mu?
+      const systemMatches = keywords.every(kw => systemSearchPool.includes(kw));
 
-          return keywords.every(kw => searchPool.includes(kw));
-        });
+      // 3. Sistem eşleşmiyorsa, bari kullanıcıların içinde aranan kelimeyi karşılayan var mı diye bak
+      const filteredUsers = (sys.users || []).filter(usr => {
+        const userSearchPool = `${systemSearchPool} ${usr.username || ''} ${usr.user_type || ''}`.toLowerCase();
+        return keywords.every(kw => userSearchPool.includes(kw));
+      });
 
-        return { ...cli, users: filteredUsers };
-      }).filter(cli => cli.users.length > 0);
-
-      return { ...sys, clients: filteredClients };
-    }).filter(sys => sys.clients.length > 0);
+      return { 
+        ...sys, 
+        // Eğer sistem direkt eşleştiyse tüm kullanıcılarını göster, 
+        // eşleşmediyse sadece aramayla eşleşen o spesifik kullanıcıları göster
+        users: systemMatches ? sys.users : filteredUsers,
+        
+        // Sistemi ekranda tutma şartımız: Ya sistemin kendisi eşleşecek, ya da içinde eşleşen kullanıcı olacak!
+        keepSystem: systemMatches || filteredUsers.length > 0
+      };
+    }).filter(sys => sys.keepSystem); // Artık "users.length > 0" yerine bu bayrağa bakıyoruz
 
     return { ...customer, systems: filteredSystems };
   }).filter(customer => {
     if (!searchTerm.trim()) return true;
-
-    const matchesCustomerName = customer.name.toLowerCase().includes(searchTerm.toLowerCase().trim());
-    const hasFilteredSystems = customer.systems && customer.systems.length > 0;
-
-    return matchesCustomerName || hasFilteredSystems;
-  }).sort((a, b) => {
-    const aHasSystems = a.systems && a.systems.length > 0;
-    const bHasSystems = b.systems && b.systems.length > 0;
-    
-    if (aHasSystems && !bHasSystems) return -1;
-    if (!aHasSystems && bHasSystems) return 1;
-    return 0;
+    const keywords = searchTerm.toLowerCase().trim().split(/\s+/);
+    // Müşteri adı eşleşiyorsa veya altında aramayla eşleşen en az 1 sistem varsa müşteriyi ekranda tut
+    const customerMatches = keywords.every(kw => (customer.name || '').toLowerCase().includes(kw));
+    return customerMatches || (customer.systems && customer.systems.length > 0);
   });
  
   const openSystemModal = (sys) => {
@@ -787,97 +783,59 @@ export default function AdminDashboard({ token, userRole }) {
                 <div style={{ padding: '16px 20px' }}>
                   {c.systems && c.systems.length > 0 ? c.systems.map(sys => (
                     <div key={sys.id} style={s.systemBlock}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      
+                      {/* SİSTEM VE CLİENT BİLGİLERİ TEK SATIRDA MERKEZLENDİ */}
+                      <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '12px', paddingBottom: '8px', borderBottom: `1px solid ${theme.borderLight}` }}>
+                        
+                        {/* SOL: SİSTEM BİLGİLERİ */}
+                        <div style={{ position: 'absolute', left: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={s.sidText}>{sys.sid}</span>
-                          <span style={s.typeBadge}>
-                            {sys.system_type}
-                          </span>
+                          <span style={s.typeBadge}>{sys.system_type}</span> {/* Sistem Tanımı */}
                           {sys.environment && (
                             <span style={s.envBadge(getSystemColor(sys.environment), getSystemColorBg(sys.environment))}>
                               {sys.environment}
                             </span>
                           )}
-                          
-                          <button 
-                            onClick={() => openSystemModal(sys)} 
-                            title="Bağlantı Parametrelerini Gör" 
-                            style={{ ...s.iconButton, fontSize: '15px' }}
-                          >
+                          <button onClick={() => openSystemModal(sys)} title="Bağlantı Parametrelerini Gör" style={{ ...s.iconButton, fontSize: '15px' }}>
                             🔌
                           </button>
-                        </h4>
-                        
-                        {/* ADMİN KONTROLÜ: CLİENT EKLE BUTONU */}
+                        </div>
+
+                        {/* ORTA: CLİENT YAZISI */}
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <strong style={{ color: theme.textSecondary, fontSize: '13px', fontWeight: 700, letterSpacing: '0.2px' }}>
+                            Client {sys.client_number}
+                          </strong>
+                        </div>
+
+                        {/* SAĞ: KULLANICI EKLE BUTONU */}
                         {isAdmin && (
-                          <button 
-                            onClick={() => {
-                              setSelectedSystemForClient(sys);
-                              setIsAddingClient(true);
-                            }}
-                            style={{ ...s.btnSecondary, padding: '4px 10px', fontSize: '11.5px', color: theme.primary, borderColor: theme.primary, display: 'flex', alignItems: 'center', gap: '4px' }}
-                            title="Bu sisteme yeni client ekle"
-                          >
-                            <span style={{ fontSize: '13px', fontWeight: 'bold' }}>+</span> Client Ekle
-                          </button>
+                          <div style={{ position: 'absolute', right: 0 }}>
+                            <button 
+                              onClick={() => {
+                                setSelectedSystemForUser(sys); // State eklenecek
+                                setIsAddingUser(true);
+                              }}
+                              style={{ ...s.btnSecondary, padding: '4px 10px', fontSize: '11.5px', color: theme.primary, borderColor: theme.primary, display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title="Bu sisteme yeni kullanıcı ekle"
+                            >
+                              <span style={{ fontSize: '13px', fontWeight: 'bold' }}>+</span> Kullanıcı Ekle
+                            </button>
+                          </div>
                         )}
                       </div>
  
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {sys.clients.map(cli => (
-                          <div key={cli.id} style={s.clientBox}>
-                            
-                            <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'center', borderBottom: `1px solid ${theme.borderLight}`, paddingBottom: '4px', marginBottom: '8px' }}>
-                              
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <strong style={{ color: theme.textSecondary, fontSize: '12px', fontWeight: 700, letterSpacing: '0.2px' }}>
-                                  Client {cli.client_number}
-                                </strong>
-                                {/* ADMİN KONTROLÜ: CLİENT DÜZENLEME İKONU */}
-                                {isAdmin && (
-                                  <button 
-                                    onClick={() => {
-                                      setSelectedClientDetails(cli);
-                                      setEditableClientData(cli);
-                                    }} 
-                                    title="Client'ı Düzenle veya Sil" 
-                                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', padding: '0', color: theme.info }}
-                                  >
-                                    ✏️
-                                  </button>
-                                )}
-                              </div>
-                              
-                              {/* ADMİN KONTROLÜ: KULLANICI EKLE BUTONU */}
-                              {isAdmin && (
-                                <div style={{ position: 'absolute', right: 0 }}>
-                                  <button 
-                                    onClick={() => {
-                                      setSelectedClientForUser(cli);
-                                      setIsAddingUser(true);
-                                    }}
-                                    style={{ ...s.btnSecondary, padding: '3px 8px', fontSize: '11px', color: theme.primary, borderColor: theme.primary, display: 'flex', alignItems: 'center', gap: '4px' }}
-                                    title="Bu client'a yeni kullanıcı ekle"
-                                  >
-                                    <span style={{ fontSize: '12px', fontWeight: 'bold' }}>+</span> Kullanıcı Ekle
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              {cli.users.map(user => (
-                                <UserCredentialCard 
-                                  key={user.id} 
-                                  user={user} 
-                                  token={token} 
-                                  handleUpdatePassword={handleUpdatePassword} 
-                                  handleDeleteUser={handleDeleteUser} 
-                                  isAdmin={isAdmin} // Karta yetki bilgisini iletiyoruz
-                                />
-                              ))}
-                            </div>
-                          </div>
+                      {/* KULLANICI LİSTESİ DOĞRUDAN SİSTEMİN ALTINDA */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {sys.users.map(user => (
+                          <UserCredentialCard 
+                            key={user.id} 
+                            user={user} 
+                            token={token} 
+                            handleUpdatePassword={handleUpdatePassword} 
+                            handleDeleteUser={handleDeleteUser} 
+                            isAdmin={isAdmin}
+                          />
                         ))}
                       </div>
                     </div>
@@ -1003,12 +961,23 @@ export default function AdminDashboard({ token, userRole }) {
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px', fontFamily: theme.font, marginTop: '16px' }}>
               <div style={s.paramRow}>
-                <div style={s.paramLabel}>Tanım:</div>
+                <div style={s.paramLabel}>Sistem Tanımı:</div>
                 <input 
                   readOnly={!isEditingSystem} 
-                  value={editableSystemData.description || ''} 
-                  onChange={(e) => setEditableSystemData({...editableSystemData, description: e.target.value})}
+                  value={editableSystemData.system_type || ''} 
+                  onChange={(e) => setEditableSystemData({...editableSystemData, system_type: e.target.value})}
                   style={s.paramInput(isEditingSystem)} 
+                />
+              </div>
+              
+              <div style={s.paramRow}>
+                <div style={s.paramLabel}>Client Numarası:</div>
+                <input 
+                  readOnly={!isEditingSystem} 
+                  maxLength="3"
+                  value={editableSystemData.client_number || ''} 
+                  onChange={(e) => setEditableSystemData({...editableSystemData, client_number: e.target.value.replace(/\D/g, '')})}
+                  style={s.paramInputSm(isEditingSystem)} 
                 />
               </div>
               
@@ -1293,8 +1262,8 @@ export default function AdminDashboard({ token, userRole }) {
               }
             }} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
               <div>
-                <label style={s.modalLabel}>Sistem Tanımı / Açıklama</label>
-                <input type="text" required value={newSystemData.description} onChange={e => setNewSystemData({...newSystemData, description: e.target.value})} style={s.modalInput} placeholder="Örn: Üretim Sistemi" />
+                <label style={s.modalLabel}>Sistem Tanımı</label>
+                <input type="text" required value={newSystemData.system_type} onChange={e => setNewSystemData({...newSystemData, system_type: e.target.value})} style={s.modalInput} placeholder="" />
               </div>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <div style={{ flex: 1 }}>
@@ -1306,8 +1275,8 @@ export default function AdminDashboard({ token, userRole }) {
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={s.modalLabel}>Sistem Tipi</label>
-                  <input type="text" required value={newSystemData.system_type} onChange={e => setNewSystemData({...newSystemData, system_type: e.target.value})} style={s.modalInput} placeholder="Örn: ABAP, JAVA, HANA..." />
+                  <label style={s.modalLabel}>Client Numarası</label>
+                  <input type="text" required maxLength="3" value={newSystemData.client_number} onChange={e => setNewSystemData({...newSystemData, client_number: e.target.value.replace(/\D/g, '')})} style={s.modalInput} placeholder="Örn: 100, 300..." />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '12px' }}>
@@ -1380,89 +1349,12 @@ export default function AdminDashboard({ token, userRole }) {
         </div>
       )}
 
-      {isAddingClient && selectedSystemForClient && isAdmin && (
-        <div style={s.overlay}>
-          <div style={s.modalCard}>
-            <div style={s.modalTitle}>
-              <span>Yeni Client Ekle <span style={{ fontSize: '13px', color: theme.textSecondary, fontWeight: 'normal' }}>({selectedSystemForClient.sid})</span></span>
-            </div>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                const res = await fetch('http://localhost:8000/sap-clients/', {
-                  method: 'POST',
-                  headers,
-                  body: JSON.stringify({
-                    client_number: newClientData.client_number,
-                    system_id: selectedSystemForClient.id
-                  })
-                });
-                if (res.ok) {
-                  alert("Client başarıyla eklendi!");
-                  setIsAddingClient(false);
-                  setNewClientData({ client_number: '' });
-                  fetchCustomers();
-                } else {
-                  const errData = await res.json();
-                  alert(`Client eklenemedi: ${errData.detail || 'Bilinmeyen hata'}`);
-                }
-              } catch (err) {
-                console.error("Client ekleme hatası:", err);
-              }
-            }} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px' }}>
-              <div>
-                <label style={s.modalLabel}>Client Numarası</label>
-                <input 
-                  type="text" 
-                  required 
-                  maxLength="3" 
-                  value={newClientData.client_number} 
-                  onChange={e => setNewClientData({...newClientData, client_number: e.target.value.replace(/\D/g, '')})} 
-                  style={s.modalInput} 
-                  placeholder="Örn: 100, 300, 400..." 
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button type="button" onClick={() => setIsAddingClient(false)} style={s.btnSecondary}>İptal</button>
-                <button type="submit" style={s.btnPrimary}>Kaydet</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
-      {selectedClientDetails && isAdmin && (
+      {isAddingUser && selectedSystemForUser && isAdmin && (
         <div style={s.overlay}>
           <div style={s.modalCard}>
             <div style={s.modalTitle}>
-              <span>Client Yönetimi</span>
-            </div>
-            <div style={{ marginTop: '16px' }}>
-              <label style={s.modalLabel}>Client Numarası</label>
-              <input 
-                type="text" 
-                maxLength="3" 
-                value={editableClientData.client_number} 
-                onChange={e => setEditableClientData({...editableClientData, client_number: e.target.value.replace(/\D/g, '')})} 
-                style={{ ...s.modalInput, backgroundColor: '#1d2d3e', color: '#ffffff' }} 
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
-              <button onClick={handleDeleteClient} style={s.btnDanger}>Client'ı Sil</button>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={() => setSelectedClientDetails(null)} style={s.btnSecondary}>İptal</button>
-                <button onClick={handleApplyClientChanges} style={s.btnSuccess}>Kaydet</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isAddingUser && selectedClientForUser && isAdmin && (
-        <div style={s.overlay}>
-          <div style={s.modalCard}>
-            <div style={s.modalTitle}>
-              <span>Yeni Kullanıcı Ekle <span style={{ fontSize: '13px', color: theme.textSecondary, fontWeight: 'normal' }}>(Client {selectedClientForUser.client_number})</span></span>
+              <span>Yeni Kullanıcı Ekle <span style={{ fontSize: '13px', color: theme.textSecondary, fontWeight: 'normal' }}>({selectedSystemForUser.sid} - Client {selectedSystemForUser.client_number})</span></span>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -1474,7 +1366,7 @@ export default function AdminDashboard({ token, userRole }) {
                     username: newUserData.username.toUpperCase(),
                     password: newUserData.password,
                     user_type: newUserData.user_type,
-                    client_id: selectedClientForUser.id
+                    system_id: selectedSystemForUser.id // <-- ARTIK SİSTEM ID'Sİ GİDİYOR
                   })
                 });
                 if (res.ok) {
@@ -1503,18 +1395,14 @@ export default function AdminDashboard({ token, userRole }) {
               </div>
               <div>
                 <label style={s.modalLabel}>Kullanıcı Tipi</label>
-                <select 
+                <input 
+                  type="text" 
+                  required 
                   value={newUserData.user_type} 
                   onChange={e => setNewUserData({...newUserData, user_type: e.target.value})} 
-                  style={{ ...s.modalInput, backgroundColor: '#1d2d3e', color: '#ffffff' }}
-                >
-                  <option value="DIALOG">Dialog (A)</option>
-                  <option value="SYSTEM">System (B)</option>
-                  <option value="COMMUNICATION">Communication (C)</option>
-                  <option value="SERVICE">Service (S)</option>
-                  <option value="REFERENCE">Reference (L)</option>
-                  <option value="RFC">RFC (Teknik Kullanıcı)</option>
-                </select>
+                  style={{ ...s.modalInput, backgroundColor: '#1d2d3e', color: '#ffffff' }} 
+                  placeholder="Örn: Dialog, System, RFC..." 
+                />
               </div>
               <div>
                 <label style={s.modalLabel}>Vault Şifresi</label>

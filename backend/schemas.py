@@ -66,6 +66,7 @@ class VpnProfileResponse(VpnProfileBase):
 # ==========================================
 class SapSystemBase(BaseModel):
     system_type: str # S/4HANA, ECC 6.0 vb.
+    client_number: str
     environment: str
     instance_number: str
     app_server: Optional[str] = None
@@ -90,30 +91,6 @@ class SapSystemResponse(SapSystemBase):
 
 
 # ==========================================
-# 4. SAP CLIENT'LARI
-# ==========================================
-class SapClientBase(BaseModel):
-    client_number: str # "100", "300", "400"
-    description: Optional[str] = None
-    comment: Optional[str] = None
-
-class SapClientCreate(SapClientBase):
-    system_id: UUID
-
-class SapClientUpdate(BaseModel):
-    client_number: Optional[str] = None
-    description: Optional[str] = None
-    comment: Optional[str] = None
-
-class SapClientResponse(SapClientBase):
-    id: UUID
-    system_id: UUID
-
-    class Config:
-        from_attributes = True
-
-
-# ==========================================
 # 5. SAP KULLANICILARI (Vault Köprüsü İçerenler)
 # ==========================================
 class SapUserBase(BaseModel):
@@ -123,7 +100,7 @@ class SapUserBase(BaseModel):
     comment: Optional[str] = None
 
 class SapUserCreate(SapUserBase):
-    client_id: UUID
+    system_id: UUID
     password: str # Formdan gelen ham şifre (Vault'a yazılacak, DB'ye gitmeyecek)
 
 class SapUserUpdate(BaseModel):
@@ -135,7 +112,7 @@ class SapUserUpdate(BaseModel):
 
 class SapUserResponse(SapUserBase):
     id: UUID
-    client_id: UUID
+    system_id: UUID
     vault_secret_path: Optional[str] = None
     last_modified_date: datetime
 

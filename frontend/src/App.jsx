@@ -236,7 +236,7 @@ function App() {
               <div style={styles.loginBrandIcon}>SAP</div>
               <div>
                 <h2 style={styles.loginTitle}>Sisteme Giriş</h2>
-                <p style={styles.loginSubtitle}>SAP Şifre Yönetim Platformu</p>
+                <p style={styles.loginSubtitle}>SecureConnect - SAP Şifre Yönetim Platformu</p>
               </div>
             </div>
             <form onSubmit={handleLogin}>
@@ -279,7 +279,7 @@ function App() {
       <div style={styles.shellBar}>
         <div style={styles.shellLeft}>
           <div style={styles.shellIcon}>SAP</div>
-          <h3 style={styles.shellTitle}>SAP Şifre Yönetim Platformu</h3>
+          <h3 style={styles.shellTitle}>SecureConnect - SAP Şifre Yönetim Platformu</h3>
         </div>
         <div style={styles.shellRight}>
           <span style={styles.roleBadge(userRole === 'admin')}>

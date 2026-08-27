@@ -49,6 +49,7 @@ class SapSystem(Base):
     sid = Column(String(3))
     environment = Column(String(10)) # DEV, QAS, PRD
     system_type = Column(String(50)) # ECC, S/4HANA
+    client_number = Column(String(3))
     app_server = Column(String(255))
     instance_number = Column(String(2))
     sap_router = Column(String(255), nullable=True)
@@ -56,23 +57,12 @@ class SapSystem(Base):
     comment = Column(Text)
     
     customer = relationship("Customer", back_populates="sap_systems")
-    clients = relationship("SapClient", back_populates="system")
-
-class SapClient(Base):
-    __tablename__ = "sap_clients"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    system_id = Column(UUID(as_uuid=True), ForeignKey("sap_systems.id"))
-    client_number = Column(String(3))
-    description = Column(Text)
-    comment = Column(Text)
-    
-    system = relationship("SapSystem", back_populates="clients")
-    users = relationship("SapUser", back_populates="client")
+    users = relationship("SapUser", back_populates="system")
 
 class SapUser(Base):
     __tablename__ = "sap_users"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    client_id = Column(UUID(as_uuid=True), ForeignKey("sap_clients.id"))
+    system_id = Column(UUID(as_uuid=True), ForeignKey("sap_systems.id"))
     username = Column(String(50))
     user_type = Column(String(50)) # Dialog, RFC, Ortak
     vault_secret_path = Column(String(255)) # Şifre kasada durur
@@ -81,7 +71,7 @@ class SapUser(Base):
     description = Column(Text)
     comment = Column(Text)
     
-    client = relationship("SapClient", back_populates="users")
+    system = relationship("SapSystem", back_populates="users")
 
 # Assignment (Danışman-Müşteri Eşleştirmesi) ve diğer tablolar (AuditLog, Comment)
 class Assignment(Base):

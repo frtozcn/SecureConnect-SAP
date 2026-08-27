@@ -6,7 +6,7 @@ import string
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from database import engine, SessionLocal, Base
-from models import PlatformUser, Customer, VpnProfile, SapSystem, SapClient, SapUser, Assignment
+from models import PlatformUser, Customer, VpnProfile, SapSystem, SapUser, Assignment
 import re
 
 # Şifre hash'leme ayarları
@@ -51,7 +51,6 @@ def seed_data():
     try:
         customers_map = {} # name -> Customer nesnesi
         systems_map = {}   # sid -> SapSystem nesnesi
-        clients_map = {}   # (sid, client_number) -> SapClient nesnesi
         users_map = {}     # email -> PlatformUser nesnesi
 
 
@@ -139,7 +138,7 @@ def seed_data():
         # ---------------------------------------------------------
         # AŞAMA 3: SAP SİSTEMLERİ VE CLIENT'LAR
         # ---------------------------------------------------------
-        print("SAP Sistemleri ve Client'lari yukleniyor...")
+        print("SAP Sistemleri yukleniyor...")
         with open("seed_data/sap_systems.csv", mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -149,26 +148,22 @@ def seed_data():
                 
                 customer_id = customers_map[cust_name].id
                 
-                # Sistemi Oluştur
+                # CSV'deki clients sütunundaki ilk değeri client_number olarak alıyoruz
+                c_num = row["clients"].split(",")[0].strip() if row["clients"] else "100"
+                
+                # Sistemi Oluştur (Artık client_number da burada)
                 sap_sys = SapSystem(
                     customer_id=customer_id,
                     sid=row["sid"],
                     environment=row["environment"],
-                    system_type=row["system_type"],
+                    system_type=row["system_type"], # Sistem Tanımı
+                    client_number=c_num,
                     app_server=row["app_server"],
                     instance_number=row["instance_number"]
                 )
                 db.add(sap_sys)
                 db.flush()
                 systems_map[sap_sys.sid] = sap_sys
-
-                # CSV'deki "100,200" gibi client'ları virgül ile ayırıp tek tek oluştur
-                client_numbers = [c.strip() for c in row["clients"].split(",")]
-                for c_num in client_numbers:
-                    sap_client = SapClient(system_id=sap_sys.id, client_number=c_num)
-                    db.add(sap_client)
-                    db.flush()
-                    clients_map[(sap_sys.sid, c_num)] = sap_client
         db.commit()
 
         # ---------------------------------------------------------
@@ -176,19 +171,14 @@ def seed_data():
         # ---------------------------------------------------------
         print("SAP Kullanicilari yukleniyor...")
         
-        # Yönerge kuralı: Her sistem-client kombinasyonu için en az 1 kullanıcı olacak şekilde seed'i tamamla
-        # Önce CSV'de olanları ekleyelim, eklenen client'ların kaydını tutalım
-        populated_clients = set()
-        
         with open("seed_data/sap_users.csv", mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 sid = row["system_sid"]
-                c_num = row["client"]
                 
-                if (sid, c_num) in clients_map:
-                    sap_client = clients_map[(sid, c_num)]
-                    populated_clients.add((sid, c_num))
+                if sid in systems_map:
+                    sap_sys = systems_map[sid]
+                    c_num = sap_sys.client_number
                     
                     vault_path = f"sap/{sid.lower()}/{c_num}/{row['username'].lower()}"
                     client.secrets.kv.v2.create_or_update_secret(
@@ -197,28 +187,12 @@ def seed_data():
                     )
                     
                     db.add(SapUser(
-                        client_id=sap_client.id,
+                        system_id=sap_sys.id, # client_id yerine system_id oldu
                         username=row["username"],
                         user_type=row["user_type"],
                         notes=row["note"],
                         vault_secret_path=vault_path
                     ))
-        
-        # CSV'de olmayan ama "en az 1 kullanıcı" kuralı gereği boş kalan client'lara otomatik kullanıcı atama
-        for (sid, c_num), sap_client in clients_map.items():
-            if (sid, c_num) not in populated_clients:
-                vault_path = f"sap/{sid.lower()}/{c_num}/default_admin"
-                client.secrets.kv.v2.create_or_update_secret(
-                    path=vault_path, 
-                    secret={"password": generate_dummy_password()}
-                )
-                db.add(SapUser(
-                    client_id=sap_client.id,
-                    username="DEFAULT_ADMIN",
-                    user_type="Dialog",
-                    notes="Otomatik uretilmis yedek kullanici.",
-                    vault_secret_path=vault_path
-                ))
         db.commit()
 
         # ---------------------------------------------------------

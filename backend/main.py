@@ -19,9 +19,15 @@ app = FastAPI(title="SecureConnect API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # React'in çalıştığı adres
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://localhost:5175", 
+        "http://localhost:5176"
+    ],
     allow_credentials=True,
-    allow_methods=["*"], # POST, GET her şeye izin ver
+    allow_methods=["*"], 
     allow_headers=["*"],
 )
 
@@ -238,98 +244,16 @@ def delete_sap_system(
         raise HTTPException(status_code=404, detail="SAP Sistemi bulunamadı.")
         
     # HATA YAKALAMA (INTEGRITY ERROR) BLOĞU EKLENDİ
-    try:
-        db.delete(db_system)
-        db.commit()
-        return {"message": "SAP Sistemi başarıyla silindi."}
-    except IntegrityError:
-        db.rollback() # Kilitlenmeyi önle
-        raise HTTPException(
-            status_code=400, 
-            detail="Bu sistemi silmeniz için altındaki client ve kullanıcıları silmeniz gerekiyor."
-        )
-
-
-# ==========================================
-# SAP CLIENT UÇ NOKTALARI
-# ==========================================
-
-
-@app.delete("/sap-clients/{client_id}")
-def delete_sap_client(
-    client_id: str,
-    db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
-):
-    if current_user.role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Sadece Admin silme işlemi yapabilir.")
-        
-    db_client = db.query(models.SapClient).filter(models.SapClient.id == client_id).first()
-    if not db_client:
-        raise HTTPException(status_code=404, detail="SAP Client bulunamadı.")
-        
-    # KESİN KORUMA: Altında kullanıcı var mı diye manuel sayıyoruz
-    user_count = db.query(models.SapUser).filter(models.SapUser.client_id == client_id).count()
+    user_count = db.query(models.SapUser).filter(models.SapUser.system_id == system_id).count()
     if user_count > 0:
         raise HTTPException(
             status_code=400, 
-            detail=f"Bu client'ı silemezsiniz! İçinde {user_count} adet kullanıcı bulunuyor."
+            detail=f"Bu sistemi silemezsiniz! İçinde {user_count} adet kullanıcı bulunuyor."
         )
-        
-    db.delete(db_client)
+
+    db.delete(db_system)
     db.commit()
-    return {"message": "SAP Client başarıyla silindi."}
-
-@app.get("/sap-clients/", response_model=list[schemas.SapClientResponse])
-def get_sap_clients(
-    skip: int = 0, 
-    limit: int = 100, 
-    db: Session = Depends(get_db),
-):
-    return db.query(models.SapClient).offset(skip).limit(limit).all()
-
-
-@app.put("/sap-clients/{client_id}", response_model=schemas.SapClientResponse)
-def update_sap_client(
-    client_id: str,
-    client_update: schemas.SapClientUpdate, 
-    db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
-):
-    # 1. Yetki kontrolü (Admin veya Uzman yapabilir)
-    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
-        raise HTTPException(status_code=403, detail="Client güncelleme yetkiniz yok.")
-    
-    # 2. İlgili kaydı veritabanında bul
-    db_client = db.query(models.SapClient).filter(models.SapClient.id == client_id).first()
-    if not db_client:
-        raise HTTPException(status_code=404, detail="SAP Client bulunamadı.")
-    
-    # 3. Gelen verilerdeki dolu alanları (None olmayanları) güncelle
-    update_data = client_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_client, key, value)
-        
-    db.commit()
-    db.refresh(db_client)
-    return db_client
-
-@app.post("/sap-clients/", response_model=schemas.SapClientResponse)
-def create_sap_client(
-    client_data: schemas.SapClientCreate, 
-    db: Session = Depends(get_db),
-    current_user: models.PlatformUser = Depends(auth.get_current_user)
-):
-    # Yetki kontrolü (Admin, Lead veya Uzman ekleyebilir)
-    if current_user.role.lower() not in ["admin", "lead", "uzman"]:
-        raise HTTPException(status_code=403, detail="Client ekleme yetkiniz yok.")
-        
-    db_client = models.SapClient(**client_data.model_dump())
-    db.add(db_client)
-    db.commit()
-    db.refresh(db_client)
-    
-    return db_client
+    return {"message": "SAP Sistemi başarıyla silindi."}
 
 # ==========================================
 # VPN PROFILE UÇ NOKTALARI
@@ -410,15 +334,15 @@ def delete_vpn_profile(
 
 @app.get("/sap-users/", response_model=list[schemas.SapUserResponse])
 def get_sap_users(
-    client_id: UUID | None = None,
+    system_id: UUID | None = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
 ):
-    query = db.query(models.SapUser).join(models.SapClient).join(models.SapSystem)
+    query = db.query(models.SapUser).join(models.SapSystem)
 
-    if client_id is not None:
-        query = query.filter(models.SapUser.client_id == client_id)
+    if system_id is not None:
+        query = query.filter(models.SapUser.system_id == system_id)
 
     return query.offset(skip).limit(limit).all()
 
@@ -497,44 +421,6 @@ def _get_sap_user_or_404(db: Session, user_id: UUID) -> models.SapUser:
     if not db_user:
         raise HTTPException(status_code=404, detail="SAP kullanıcısı bulunamadı.")
     return db_user
-
-
-
-
-def _log_audit(db: Session, current_user: models.PlatformUser, action: str,
-                resource_type: str, resource_id, request: Request = None, detail: str = None):
-    
-    target_name_val = None
-    target_context_val = None
-
-    if resource_type == "sap_user":
-        db_obj = db.query(models.SapUser).filter(models.SapUser.id == resource_id).first()
-        if db_obj:
-            target_name_val = db_obj.username
-            # İlişkisel tablolardan sistemi ve client'ı çek
-            if db_obj.client and db_obj.client.system:
-                sys = db_obj.client.system
-                target_context_val = f"{sys.sid} {sys.environment} {sys.system_type} (Client {db_obj.client.client_number})"
-    
-    # Diğer kaynaklar için (Customer vb. yorum atıldığında hata vermesin diye)
-    elif resource_type == "customer":
-        db_obj = db.query(models.Customer).filter(models.Customer.id == resource_id).first()
-        if db_obj:
-            target_name_val = db_obj.name
-
-    log = models.AuditLog(
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        target_name=target_name_val,
-        target_context=target_context_val, # ORTAM BİLGİSİ
-        ip_address=request.client.host if request and request.client else None,
-        detail=detail,
-    )
-    db.add(log)
-    db.commit()
 
 @app.post("/sap-users/{user_id}/reveal-password", response_model=schemas.SapUserPasswordResponse)
 def reveal_sap_user_password(
@@ -650,12 +536,9 @@ def _resolve_resource_customer_id(db: Session, resource_type: str, resource_id) 
         obj = db.query(models.VpnProfile).filter(models.VpnProfile.id == resource_id).first()
     elif resource_type == "sap_system":
         obj = db.query(models.SapSystem).filter(models.SapSystem.id == resource_id).first()
-    elif resource_type == "sap_client":
-        obj = db.query(models.SapClient).filter(models.SapClient.id == resource_id).first()
-        return str(obj.system.customer_id) if obj else None
     elif resource_type == "sap_user":
         obj = db.query(models.SapUser).filter(models.SapUser.id == resource_id).first()
-        return str(obj.client.system.customer_id) if obj else None
+        return str(obj.system.customer_id) if obj else None
     else:
         return None
     return str(obj.customer_id) if obj else None
@@ -752,3 +635,37 @@ def get_audit_logs(
              
     return logs
 
+def _log_audit(db: Session, current_user: models.PlatformUser, action: str,
+                resource_type: str, resource_id, request: Request = None, detail: str = None):
+    
+    target_name_val = None
+    target_context_val = None
+
+    if resource_type == "sap_user":
+        db_obj = db.query(models.SapUser).filter(models.SapUser.id == resource_id).first()
+        if db_obj:
+            target_name_val = db_obj.username
+            # İlişkisel tablolardan sistemi ve client'ı çek
+            if db_obj.system:
+                sys = db_obj.system
+                target_context_val = f"{sys.sid} {sys.environment} {sys.system_type} (Client {sys.client_number})"
+    
+    # Diğer kaynaklar için (Customer vb. yorum atıldığında hata vermesin diye)
+    elif resource_type == "customer":
+        db_obj = db.query(models.Customer).filter(models.Customer.id == resource_id).first()
+        if db_obj:
+            target_name_val = db_obj.name
+
+    log = models.AuditLog(
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        target_name=target_name_val,
+        target_context=target_context_val, # ORTAM BİLGİSİ
+        ip_address=request.client.host if request and request.client else None,
+        detail=detail,
+    )
+    db.add(log)
+    db.commit()
