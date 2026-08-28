@@ -53,6 +53,6 @@ Sistem şu anda yerel geliştirme (mock) veritabanı ile çalışacak şekilde y
 
 Canlı ortamda `SecureConnect-SAP.vbs` dosyasından çıkartılacak komutlar (dosya içinde yorum satırıyla da işaretlenmiştir):
 * `docker compose down && `
-* `docker compose exec -T backend python seed.py && `
+* `docker exec -it secureconnect-app python seed.py && `
 
 Geçiş yapıldıktan sonra seed.py dosyası kullanılmamalı ve sistem sadece `docker compose up -d` komutuyla, mevcut verileri koruyarak başlatılmalıdır.
