@@ -36,7 +36,7 @@ docker compose down
 docker compose up -d
 
 **2. Test Verilerini Yükleyin:**
-docker compose exec backend python seed.py
+docker exec -it secureconnect-app python seed.py
 
 **3. Frontendi Çalıştırın:**
 cd ../frontend
