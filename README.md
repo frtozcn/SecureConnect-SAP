@@ -41,6 +41,7 @@ docker compose exec backend python seed.py
 **3. Frontendi Çalıştırın:**
 cd ../frontend
 npm run dev
+```
 
 **🔑 Giriş Bilgileri: Veri tohumlama aşamasında oluşturulan test kullanıcılarının e-posta adresleri backend/seed_data/platform_users.csv dosyasında yer almaktadır. 
 **Tüm test kullanıcıları için varsayılan şifre: "Ndbs_Test_123!" olarak belirlenmiştir.
